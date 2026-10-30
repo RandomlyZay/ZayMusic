@@ -802,6 +802,13 @@ private struct CatalogBackButton: ViewModifier {
     }
 }
 
+/// Evaluate large screen factories in a separate SwiftUI body update, rather than
+/// while the TabView and all its sibling navigation roots are being constructed.
+private struct ScreenContent: View {
+    let build: () -> AnyView
+    var body: some View { build() }
+}
+
 struct ContentView: View {
     @EnvironmentObject var music: Music
     @State private var pendingSongDeletion: [String: Any]?
@@ -838,17 +845,17 @@ struct ContentView: View {
     private var tabs: AnyView {
         AnyView(TabView(selection: $selectedTab) {
                 AnyView(NavigationStack {
-                    screen("Home")
+                    ScreenContent { AnyView(screen("Home")) }
                 }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Home", systemImage: "house.fill") }.tag("Home")
                 AnyView(NavigationStack {
-                    searchScreen
+                    ScreenContent { AnyView(searchScreen) }
                 }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Search", systemImage: "magnifyingglass") }.tag("Search")
                 AnyView(NavigationStack {
-                    libraryList.navigationTitle("Your Library")
+                    ScreenContent { AnyView(libraryList.navigationTitle("Your Library")) }
                 }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Library", systemImage: "books.vertical") }.tag("Library")
                     .badge(music.attentionCount)
                 AnyView(NavigationStack {
-                    NativeSettings { screen("Downloads") }
+                    ScreenContent { AnyView(NativeSettings { ScreenContent { AnyView(screen("Downloads")) } }) }
                 }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Settings", systemImage: "gear") }.tag("Settings")
             }
             .modifier(SystemTabPlayer(open: { sheet = true }))
@@ -856,7 +863,7 @@ struct ContentView: View {
     }
 
     private var observedTabs: AnyView {
-        AnyView(tabs
+        AnyView(ScreenContent { tabs }
             .task {
                 // Server failures change without the app's help; re-read them about once a minute.
                 while !Task.isCancelled {
@@ -881,7 +888,7 @@ struct ContentView: View {
     }
 
     private var collectionPresentations: AnyView {
-        AnyView(observedTabs
+        AnyView(ScreenContent { observedTabs }
             .sheet(isPresented: $collectionActions, onDismiss: {
                 let action = pendingCollectionAction
                 pendingCollectionAction = nil
@@ -893,7 +900,7 @@ struct ContentView: View {
     }
 
     private var playlistPresentations: AnyView {
-        AnyView(collectionPresentations
+        AnyView(ScreenContent { collectionPresentations }
             .alert(editingPlaylistId == nil ? "New playlist" : "Rename playlist", isPresented: $playlistEditor) {
                 TextField("Playlist name", text: $playlistName)
                 Button("Save") { let id = editingPlaylistId; let name = playlistName; Task { _ = await music.mutatePlaylist(["op": id == nil ? "create" : "rename", "id": id ?? "", "name": name], refresh: true) } }
@@ -918,7 +925,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        playlistPresentations
+        ScreenContent { playlistPresentations }
         .sheet(isPresented: $sheet) {
             NowPlayingView(goTo: goTo).environmentObject(music)
         }
@@ -1144,9 +1151,9 @@ struct ContentView: View {
         libraryLoaded = text != nil
     }
 
-    func libraryItemLink(_ item: [String: Any]) -> some View {
+    func libraryItemLink(_ item: [String: Any]) -> AnyView {
         let source = item["browseKind"] as? String ?? item["kind"] as? String ?? ""
-        return NavigationLink {
+        return AnyView(NavigationLink {
             if source == "liked" { screen("Liked Songs") } else { collectionScreen(source, item) }
         } label: {
             HStack(spacing: 12) {
@@ -1160,27 +1167,30 @@ struct ContentView: View {
         }
         .listRowSeparator(.hidden)
         .accessibilityIdentifier("library-item-\(item["id"] as? String ?? "unknown")")
+        )
     }
 
     /// A collection pushed by the system navigation stack; its own Back pops the stack.
-    func collectionScreen(_ source: String, _ row: [String: Any]) -> some View {
-        trackList
+    func collectionScreen(_ source: String, _ row: [String: Any]) -> AnyView {
+        AnyView(ScreenContent { AnyView(trackList) }
             .navigationTitle(music.headerTitle)
             .navigationBarTitleDisplayMode(.inline)
             .modifier(OpenCollectionOnFirstAppearance(source: source, row: row))
             .modifier(CatalogBackButton())
             .toolbar { collectionToolbar }
+        )
     }
 
-    func libraryLink(_ page: String, _ subtitle: String, kind: ArtKind = .other, symbol: String? = nil) -> some View {
-        NavigationLink { screen(page) } label: {
+    func libraryLink(_ page: String, _ subtitle: String, kind: ArtKind = .other, symbol: String? = nil) -> AnyView {
+        AnyView(NavigationLink { ScreenContent { AnyView(screen(page)) } } label: {
             LibraryRow(title: page, subtitle: subtitle, kind: kind, symbol: symbol)
         }
         .listRowSeparator(.hidden)
+        )
     }
 
-    func screen(_ page: String) -> some View {
-        trackList
+    func screen(_ page: String) -> AnyView {
+        AnyView(ScreenContent { AnyView(trackList) }
             .navigationTitle(music.page == page ? page : music.headerTitle)
             .navigationBarTitleDisplayMode(showsHero ? .inline : .large)
             .modifier(LoadCatalogOnFirstAppearance(page: page))
@@ -1197,6 +1207,7 @@ struct ContentView: View {
                 }
             }
             .toolbar { collectionToolbar }
+        )
     }
 
     var isPlaylistCollection: Bool { music.page == "Collection" && music.collectionContext["kind"] as? String == "playlists" }
@@ -1533,13 +1544,13 @@ struct ContentView: View {
         }
     }
 
-    func trackRow(_ row: [String: Any], at index: Int) -> some View {
+    func trackRow(_ row: [String: Any], at index: Int) -> AnyView {
         let download = row["download"] as? [String: Any]
         let state = download?["state"] as? String ?? ""
         let source = music.rowKind(row)
         let id = row["id"] as? String ?? "unknown"
         let choosing = selecting && !music.resolvedKind.isEmpty && source == "songs"
-        return Button {
+        return AnyView(Button {
             if choosing { if selectedIds.contains(id) { selectedIds.remove(id) } else { selectedIds.insert(id) } }
             else { music.select(row, at: index) }
         } label: {
@@ -1601,6 +1612,7 @@ struct ContentView: View {
                 Button(role: .destructive) { music.queueAction("remove", row: row) } label: { Label("Remove from queue", systemImage: "minus.circle") }
             }
         }
+        )
     }
 
     @ViewBuilder func rowMenu(_ row: [String: Any], source: String, download: [String: Any]?, state: String) -> some View {

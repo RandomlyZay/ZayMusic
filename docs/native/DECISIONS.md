@@ -154,3 +154,12 @@ are historical where they describe a supported web client or hosted Linux CI.
   Keep tab tags, labels and badges outside erasure so TabView sees their traits.
   Linux parsing/bridge checks cannot establish device startup success; verify the
   rebuilt IPA in LiveContainer as well as simulator UI tests.
+- Device follow-up showed root type erasure alone was insufficient: the b9ace78
+  IPA UUID 05edda70-4f67-3a85-9f29-716fb55498e9 crashed in `___chkstk_darwin`
+  while constructing `libraryList` (app offset 198004), through the eager tab
+  and presentation factories. The device report gives a 1008 KB main stack.
+  Use a concrete `ScreenContent` View to evaluate each screen factory in its
+  own SwiftUI body update; returning AnyView from a computed property alone
+  still constructs its whole payload on the caller's stack. Erase Library link
+  and track-row payload types too, bounding the values stored inline in lists.
+  Simulator success does not verify the device's smaller stack budget.
