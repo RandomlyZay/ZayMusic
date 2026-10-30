@@ -272,8 +272,13 @@ final class Screenshots: XCTestCase {
         select("Home", title: "Home", app: app)
         XCTAssertTrue(app.staticTexts["Fixture song 1"].waitForExistence(timeout: 10))
         capture("Home", app: app)
-        app.staticTexts["Fixture song 4"].press(forDuration: 1)
-        app.buttons["Add to playlist"].tap()
+        // Target the row that owns the context menu, rather than its text child.
+        let songForPlaylist = app.buttons["row-fixture-4"]
+        reveal(songForPlaylist, app: app)
+        songForPlaylist.press(forDuration: 1.5)
+        let addToPlaylist = app.buttons["Add to playlist"]
+        XCTAssertTrue(addToPlaylist.waitForExistence(timeout: 10))
+        addToPlaylist.tap()
         XCTAssertTrue(app.navigationBars["Add to playlist"].waitForExistence(timeout: 10))
         let selectedSong = app.staticTexts["playlist-selected-song"]
         XCTAssertTrue(selectedSong.waitForExistence(timeout: 10))
