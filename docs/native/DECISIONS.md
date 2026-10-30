@@ -98,7 +98,7 @@ are historical where they describe a supported web client or hosted Linux CI.
 
 - Derive `IPHONEOS_DEPLOYMENT_TARGET` from the XcodeGen project before Cargo builds, so Rust and native C dependencies use the app’s existing iOS 17 minimum on every device/simulator slice. This is a minimum OS, separate from the modern SDK used for Liquid Glass. Run 40918440196 exposed Rust’s unset default of iOS 10 against C objects built for the SDK version, failing the AWS-LC stack-probe link. Include the SDK and Apple build configuration/scripts in the Rust cache key. Verify Rust’s effective minimum on Linux and before each Apple slice build. [Rust’s iOS target documentation](https://doc.rust-lang.org/rustc/platform-support/apple-ios.html) documents this environment variable.
 
-- GitHub Actions is now macOS-only and explicitly dispatched. Normal pushes and PR updates spend no hosted compute; the devbox local-check script replaces all five Linux jobs. The workflow has already run and can be dispatched by its numeric ID without merging to main. Do not start another Apple run merely to test this budget change. Keep existing downloadable IPAs outside artifact expiry; use 14-day IPA and 7-day simulator artifact retention. No subscription or billing setting is changed.
+- GitHub Actions is macOS-only; the devbox local-check script replaces the Linux jobs. At the owner’s request, PR events build/test automatically so checks are attached to the PR for watcher notifications. Manual dispatch remains available outside PRs. Concurrency is scoped per PR/ref. Keep existing downloadable IPAs outside artifact expiry; use 14-day IPA and 7-day simulator artifact retention. No subscription or billing setting is changed.
 - Listening history and scrobble thresholds belong in the shared core. Native engines report actual clocks/completion with a shared playback epoch; queued lookahead, paused/previews and stale callbacks never count. Record up to 50 recent library songs locally and submit online scrobbles once per play at half the duration or four minutes, following the web engine. Repeat-one starts a fresh epoch so a genuine new play counts. SQLite/HTTP work runs outside audio/UI callbacks; transport failures remain best-effort, as on the web, rather than inventing an offline scrobble queue.
 
 - Manual iOS runs are attached to PR #4 in GitHub, but T3 missed their failure
@@ -136,7 +136,7 @@ are historical where they describe a supported web client or hosted Linux CI.
   Tailnet hostnames remain in code defaults and history; they are not credentials.
   The README states it is a personal project with no license; the MIT Cargo metadata
   was removed. Issues, wiki and projects are disabled. Standard macOS runners are
-  free for public repositories, but keep the workflow manual and batched.
+  free for public repositories. PR checks run automatically; batch related changes.
 - At the owner's request the public history was squashed into one commit on `main`.
   A force-push alone leaves old commits reachable through PR refs and SHA URLs, so the
   original repository was made private and renamed as an archive, and a new public

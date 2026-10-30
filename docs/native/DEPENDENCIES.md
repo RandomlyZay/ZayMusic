@@ -67,7 +67,7 @@ ZayFetch images install from `uv.lock` with UV 0.13.6, including r128gain; silen
 - Swift Linux bridge image 6.4.1.
 - macOS 26 runners select the newest stable installed Xcode, require an iOS SDK >=26, and select a modern available simulator. The final app metadata is checked for modern SDK linkage, background audio and unsigned packaging. No beta SDK download is required.
 - XcodeGen is refreshed through Homebrew; DerivedData caches are separated by SDK.
-- Only the manual macOS job remains on GitHub. The devbox local-check script runs all Linux validation.
+- Only the macOS job remains on GitHub, triggered by PR events or manual dispatch. The devbox local-check script runs all Linux validation.
 
 | Action | Upstream version | Pinned commit |
 |---|---|---|
