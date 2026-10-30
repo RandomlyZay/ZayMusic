@@ -1,0 +1,85 @@
+name: Native iOS build
+# All Linux validation runs on devbox via scripts/native-local-checks.sh.
+# Dispatch only when an IPA/simulator build is requested; pushes spend no minutes.
+on:
+  workflow_dispatch:
+concurrency:
+  group: native-ios
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify modern Apple SDK for native Liquid Glass
+        id: apple-sdk
+        run: |
+          export DEVELOPER_DIR="$(python3 scripts/native-ios-platform.py xcode)"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          xcodebuild -version
+          SDK_VERSION=$(xcrun --sdk iphoneos --show-sdk-version)
+          python3 scripts/native-ios-platform.py sdk "$SDK_VERSION"
+          echo "version=$SDK_VERSION" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # current master; explicit stable toolchain
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ios-sdk${{ steps.apple-sdk.outputs.version }}-${{ hashFiles('apps/ios/project.yml', 'scripts/native-ios-*') }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            build/ios-simulator
+            ~/Library/Developer/Xcode/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+          key: ios-derived-${{ runner.arch }}-sdk${{ steps.apple-sdk.outputs.version }}-${{ hashFiles('apps/ios/**', 'Cargo.lock') }}
+          restore-keys: ios-derived-${{ runner.arch }}-sdk${{ steps.apple-sdk.outputs.version }}-
+      - name: Install current XcodeGen
+        run: |
+          brew update --quiet
+          if brew list --versions xcodegen >/dev/null 2>&1; then brew upgrade xcodegen; else brew install xcodegen; fi
+      - run: ./scripts/native-ios-build.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ZayMusic-unsigned-ipa
+          retention-days: 14
+          path: build/ZayMusic-unsigned.ipa
+      - name: Start loopback UI fixture server
+        run: |
+          python3 scripts/native-fixture-server.py --management-fixtures > build/native-fixtures.log 2>&1 &
+          echo $! > build/native-fixtures.pid
+          python3 - <<'PYWAIT'
+          import time, urllib.request
+          for _ in range(50):
+              try:
+                  urllib.request.urlopen('http://127.0.0.1:18765/healthz', timeout=1).close()
+                  break
+              except OSError:
+                  time.sleep(0.1)
+          else:
+              raise SystemExit('Fixture server did not start')
+          PYWAIT
+      - name: Simulator unit and screen tests
+        env:
+          TEST_RUNNER_ZAY_MANAGEMENT_FIXTURES: "1"
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 scripts/native-ios-platform.py simulator)
+          xcodebuild -project apps/ios/ZayMusic.xcodeproj -scheme ZayMusic -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/ios-simulator -resultBundlePath build/NativeScreens.xcresult CODE_SIGNING_ALLOWED=NO test
+      - name: Export simulator screenshots
+        if: always()
+        run: |
+          if [[ -d build/NativeScreens.xcresult ]]; then
+            mkdir -p build/screenshots
+            xcrun xcresulttool export attachments --path build/NativeScreens.xcresult --output-path build/screenshots
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: native-simulator-screenshots
+          retention-days: 7
+          path: |
+            build/screenshots
+            build/NativeScreens.xcresult

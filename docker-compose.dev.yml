@@ -1,0 +1,9 @@
+# docker-compose.dev.yml  — LOCAL DEV ONLY. Never in the deploy bundle.
+name: zaymusic
+services:
+  navidrome:
+    ports:
+      - "127.0.0.1:4533:4533"     # loopback only
+  zayfetch:
+    ports:
+      - "127.0.0.1:8081:8080"     # loopback only; host 8080 is taken on fedora-server

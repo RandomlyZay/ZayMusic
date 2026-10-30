@@ -1,0 +1,10 @@
+# Only the gateway image builds from the repository root (the other images use
+# their own service directories). Allowlist exactly what its workspace build
+# reads, so secrets, media, dev data and other apps never enter the context.
+*
+!Cargo.toml
+!Cargo.lock
+!crates/zay-core/Cargo.toml
+!apps/linux/Cargo.toml
+!crates/zay-gateway/
+crates/zay-gateway/target

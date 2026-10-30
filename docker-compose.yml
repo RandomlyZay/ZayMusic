@@ -1,0 +1,114 @@
+name: zaymusic
+
+services:
+  navidrome:
+    image: deluan/navidrome:0.64.2
+    container_name: zaymusic-navidrome
+    restart: unless-stopped
+    environment:
+      ND_MUSICFOLDER: /music
+      ND_DATAFOLDER: /data
+      ND_SCANSCHEDULE: 1m
+      ND_LOGLEVEL: info
+      ND_PORT: 4533
+      ND_ENABLETRANSCODINGCONFIG: "true"
+      ND_SESSIONTIMEOUT: 720h   # 30 days (Go duration has no "d" unit)
+    volumes:
+      - ${MUSIC_DIR:-./music}:/music:z
+      - ${NAVIDROME_DATA_DIR:-./navidrome}:/data:z
+    expose: ["4533"]
+    networks: [zay]
+
+  zayfetch:
+    build:
+      context: ./services/zayfetch
+    container_name: zaymusic-zayfetch
+    restart: unless-stopped
+    environment:
+      ZAYFETCH_TOKEN: ${ZAYFETCH_TOKEN}
+      LASTFM_API_KEY: ${LASTFM_API_KEY:-}
+      MUSIC_DIR: /music
+      STAGING_DIR: /data/staging
+      DATA_DIR: /data
+      NAVIDROME_URL: http://navidrome:4533
+      NAVIDROME_USER: ${NAVIDROME_USER}
+      NAVIDROME_PASS: ${NAVIDROME_PASS}
+      POT_PROVIDER_URL: http://pot-provider:4416
+      # Managed session: the browser owns the Google sign-in; set empty to
+      # disable browser mode and use the stored cookies.txt as before.
+      BROWSER_CDP_URL: ${BROWSER_CDP_URL-http://browser:9222}
+      YOUTUBE_SESSION_TOUCH_MINUTES: ${YOUTUBE_SESSION_TOUCH_MINUTES:-30}
+      # Google API OAuth (optional; API-only — downloads still need the session).
+      YTM_OAUTH_CLIENT_ID: ${YTM_OAUTH_CLIENT_ID:-}
+      YTM_OAUTH_CLIENT_SECRET: ${YTM_OAUTH_CLIENT_SECRET:-}
+      # Automated re-login: when the managed browser's Google session is
+      # revoked, the keeper signs back in with these (TOTP secret optional).
+      # Leave EMAIL/PASSWORD empty to keep manual sign-in via noVNC.
+      GOOGLE_EMAIL: ${GOOGLE_EMAIL:-}
+      GOOGLE_PASSWORD: ${GOOGLE_PASSWORD:-}
+      GOOGLE_TOTP_SECRET: ${GOOGLE_TOTP_SECRET:-}
+      YOUTUBE_RELOGIN_MIN_MINUTES: ${YOUTUBE_RELOGIN_MIN_MINUTES:-60}
+    volumes:
+      - ${MUSIC_DIR:-./music}:/music:z
+      - ${ZAYFETCH_DATA_DIR:-./zayfetch/data}:/data:z
+    expose: ["8080"]
+    depends_on: [navidrome, pot-provider, browser]
+    networks: [zay]
+
+  # Managed session (§5.1): a real Chromium on the server that owns the
+  # Google sign-in. noVNC (loopback only) lets a human sign in once; zayfetch
+  # exports live cookies over CDP as they rotate. browser/data/ is a
+  # credential store — keep it gitignored and out of the deploy bundle.
+  browser:
+    build:
+      context: ./services/browser
+    container_name: zaymusic-browser
+    restart: unless-stopped
+    # Forward stop signals to the supervisor and reap Chromium's children.
+    # Allow the CDP shutdown hook to flush the profile before stopping.
+    init: true
+    stop_grace_period: 30s
+    volumes:
+      - ${BROWSER_DATA_DIR:-./browser/data}:/data:z
+    ports:
+      - "127.0.0.1:${BROWSER_PORT:-6080}:6080"   # LOOPBACK ONLY (noVNC). Tailscale-only.
+    expose: ["9222"]                              # CDP, internal network only
+    networks: [zay]
+
+  # PO Token provider: YouTube binds playback tokens to the video ID for
+  # authenticated sessions; without this, yt-dlp's web clients get SABR-only
+  # formats and gated/premium tracks extract no audio. Internal only.
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.2
+    container_name: zaymusic-pot-provider
+    restart: unless-stopped
+    expose: ["4416"]
+    networks: [zay]
+
+  # Native API gateway (crates/zay-gateway). The service key stays "zaymusic"
+  # for existing deploy commands. It injects Navidrome auth and the ZayFetch
+  # token server-side; clients hold no service credentials.
+  zaymusic:
+    build:
+      context: .
+      dockerfile: crates/zay-gateway/Dockerfile
+    container_name: zaymusic-gateway
+    restart: unless-stopped
+    environment:
+      ZAYFETCH_URL: http://zayfetch:8080
+      ZAYFETCH_TOKEN: ${ZAYFETCH_TOKEN}
+      NAVIDROME_URL: http://navidrome:4533
+      NAVIDROME_USER: ${NAVIDROME_USER}
+      NAVIDROME_PASS: ${NAVIDROME_PASS}
+      PORT: "3000"
+      BUILD_SHA: ${BUILD_SHA:-}
+      # Public noVNC address offered to native settings via
+      # /api/native/config (e.g. a tailscale serve URL); empty returns null.
+      PUBLIC_REMOTE_BROWSER_URL: ${PUBLIC_REMOTE_BROWSER_URL:-}
+    ports:
+      - "127.0.0.1:${APP_PORT:-3847}:3000"   # LOOPBACK ONLY. Tailscale-only exposure.
+    depends_on: [navidrome, zayfetch]
+    networks: [zay]
+
+networks:
+  zay:

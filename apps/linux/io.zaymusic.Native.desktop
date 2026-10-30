@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ZayMusic Native Preview
+Comment=Native music library and player
+Exec=zaymusic
+Icon=io.zaymusic.Native
+Terminal=false
+Categories=Audio;Music;Player;

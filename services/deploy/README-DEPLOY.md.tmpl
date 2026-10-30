@@ -1,0 +1,76 @@
+# ZayMusic — host deploy runbook
+
+Host: fedora-server. Bundle source:  devbox:~/Projects/ZayMusic/deploy-bundle/
+Deploy root: ~/services/zaymusic/
+
+## 0. Preconditions
+- Docker + docker compose v2 available
+- Tailscale running (for tailscale serve)
+- Ports 8080/8384/22000/51515/8888/3001 are NOT to be used
+
+## 1. Fetch the bundle (host-initiated pull; no devbox-held host keys)
+mkdir -p ~/services/zaymusic
+rsync -a --delete \
+  devbox:~/Projects/ZayMusic/deploy-bundle/ \
+  ~/services/zaymusic/
+# (fallback) scp -r devbox:~/Projects/ZayMusic/deploy-bundle/. ~/services/zaymusic/
+
+## 2. Secrets (first deploy only; mode 600)
+test -f ~/services/zaymusic/.env || {
+  cd ~/services/zaymusic && bash gen-secrets.sh > .env && chmod 600 .env
+}
+chmod 600 ~/services/zaymusic/.env
+# Edit .env if you want to override APP_PORT, NAVIDROME_*, etc.
+
+## 3. Persist dirs
+mkdir -p ~/services/zaymusic/{music,navidrome,zayfetch/data/staging,browser/data}
+
+## 4. Build + start
+cd ~/services/zaymusic
+# REQUIRED: export BUILD_SHA so /healthz reports the deployed bundle sha
+export BUILD_SHA=$(python3 -c "import json;print(json.load(open('app-manifest.json'))['sha'])")
+echo "BUILD_SHA=$BUILD_SHA"
+# The "zaymusic" service is the native API gateway (container zaymusic-gateway).
+# Upgrading from a web-client bundle: compose replaces the old zaymusic-web
+# container automatically; nothing else changes (same .env keys, port 3847).
+docker compose up -d --build
+# write the sha into .env so restarts keep it
+grep -q '^BUILD_SHA=' .env && sed -i "s/^BUILD_SHA=.*/BUILD_SHA=$BUILD_SHA/" .env || echo "BUILD_SHA=$BUILD_SHA" >> .env
+chmod 600 .env
+
+## 5. First deploy only: create the Navidrome admin (idempotent)
+docker compose run --rm zayfetch python -m zayfetch.bootstrap_admin
+
+## 6. Expose over Tailscale (loopback only; no LAN/public)
+tailscale serve --bg --https=443 http://127.0.0.1:3847
+# Verify: curl -fsS https://fedora-server.tailfc5dc.ts.net/healthz
+
+# The managed browser's noVNC is loopback-only too. Serve it on its own port;
+# native settings read the address from /api/native/config.
+tailscale serve --bg --https=8446 http://127.0.0.1:6080
+grep -q '^PUBLIC_REMOTE_BROWSER_URL=' .env \
+  && sed -i "s|^PUBLIC_REMOTE_BROWSER_URL=.*|PUBLIC_REMOTE_BROWSER_URL=https://fedora-server.tailfc5dc.ts.net:8446/vnc.html|" .env \
+  || echo "PUBLIC_REMOTE_BROWSER_URL=https://fedora-server.tailfc5dc.ts.net:8446/vnc.html" >> .env
+chmod 600 .env
+docker compose up -d zaymusic
+# Open it once and sign in to music.youtube.com. Then: Settings → YouTube Music.
+
+## 7. Backups
+Include in nightly backups (critical):
+  ~/services/zaymusic/music/
+  ~/services/zaymusic/navidrome/
+  ~/services/zaymusic/browser/data/   (live Google session — credential store)
+  ~/services/zaymusic/.env        (securely / separately)
+Optional:
+  ~/services/zaymusic/zayfetch/data/jobs.db
+Do NOT back up:
+  ~/services/zaymusic/zayfetch/data/staging/
+  ~/services/zaymusic/{apps,crates,services}/   (re-deployable)
+
+## 8. Subsequent deploys
+Repeat steps 1, 4. (Skip 2, 3, 5, 6 — all idempotent/skipped.)
+Then tell the devbox agent to run ./scripts/wait-healthy.sh && ./scripts/smoke.sh
+
+## Rollback
+The previous bundle is not retained automatically. To roll back, ask the devbox
+agent to re-run ./scripts/mkbundle.sh against an older git commit and redeploy.
