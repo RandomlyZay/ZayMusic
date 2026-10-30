@@ -1581,6 +1581,9 @@ struct ContentView: View {
                 }
             }
             .contentShape(Rectangle())
+            // Install the menu on the label hit area so a long press is handled
+            // before the outer playback button and List swipe actions.
+            .contextMenu { rowMenu(row, source: source, download: download, state: state) }
         }
         .buttonStyle(.plain)
         .listRowSeparator(.hidden)
@@ -1598,7 +1601,6 @@ struct ContentView: View {
                 Button(role: .destructive) { music.queueAction("remove", row: row) } label: { Label("Remove from queue", systemImage: "minus.circle") }
             }
         }
-        .contextMenu { rowMenu(row, source: source, download: download, state: state) }
     }
 
     @ViewBuilder func rowMenu(_ row: [String: Any], source: String, download: [String: Any]?, state: String) -> some View {
