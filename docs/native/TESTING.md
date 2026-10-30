@@ -75,10 +75,12 @@ belong in native settings or test command lines.
 
 ## Local validation and macOS budget
 
-**All Linux validation runs on devbox. GitHub Actions is macOS-only and manual.**
-A normal branch push or PR update starts no hosted runner. The repository is public,
+**All Linux validation runs on devbox. GitHub Actions runs macOS checks on PRs.**
+Opening or updating a PR builds the IPA and runs simulator tests, attaching the
+checks to that PR so its watcher can track them. Branch pushes without a PR do
+not start a runner. The repository is public,
 so standard macOS runners no longer use the private-minutes quota; still batch
-Apple changes. No paid plan or spending limit was changed. Before requesting an Apple build, run:
+Apple changes. No paid plan or spending limit was changed. Before pushing changes for an Apple build, run:
 
 ```sh
 ./scripts/native-local-checks.sh all
@@ -94,7 +96,7 @@ For live dev-only checks, separately run `./scripts/native-linux-smoke.sh` and
 `ZAY_SERVER=https://devbox.tailfc5dc.ts.net:8445 cargo run -p zay-core --example playlist_smoke`.
 The latter cleans up only its temporary playlist; neither check logs account IDs.
 
-When an IPA build is requested, dispatch the manual workflow:
+For an IPA build outside a PR, dispatch the manual workflow:
 
 ```sh
 gh workflow run native.yml --ref main
@@ -102,8 +104,8 @@ gh workflow run native.yml --ref main
 
 No dispatch is performed by the local checks or install scripts. The macOS workflow
 keeps Rust/SPM/DerivedData caches, cancels superseded builds, uploads the unsigned
-IPA for 14 days and screenshot/test-result artifacts for 7 days. Batching changes
-before a requested build avoids spending minutes per push. Once green, download
+IPA for 14 days and screenshot/test-result artifacts for 7 days. New commits cancel
+superseded builds for the same PR; separate PRs do not cancel each other. Once green, download
 both artifacts, inspect the IPA and screenshots, and publish the direct attachment.
 
 Historical web-era runs (e6c510e and earlier) also ran web/browser tests; those

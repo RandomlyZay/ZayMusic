@@ -1,10 +1,12 @@
 name: Native iOS build
 # All Linux validation runs on devbox via scripts/native-local-checks.sh.
-# Dispatch only when an IPA/simulator build is requested; pushes spend no minutes.
+# PR events attach Apple checks to the PR for review and watcher notifications.
+# Manual dispatch remains available for builds outside a PR.
 on:
+  pull_request:
   workflow_dispatch:
 concurrency:
-  group: native-ios
+  group: native-ios-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 permissions:
   contents: read

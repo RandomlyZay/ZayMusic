@@ -8,7 +8,8 @@
   request). The README states it is personal and unlicensed; issues/wiki/projects off.
   Old history, PR #4, reviews and Actions runs: private `RandomlyZay/ZayMusic-archive-2026-10`
   plus the bundle in ~/.local/share/zaymusic-history/. Mac builds:
-  `gh workflow run native.yml --ref main` (manual, batched).
+  PR events automatically build/test and attach checks to the PR;
+  `gh workflow run native.yml --ref main` remains available outside PRs.
 - Web client removed (owner override). Historical spec: 93f43ec:apps/web/... in the private archive repo or history bundle.
 - Privacy: never read dev.env/.env, real keys/user IDs, browser storage, real settings
   screens or compiled credentials. Fixture data only. Agents may work on fedora-server

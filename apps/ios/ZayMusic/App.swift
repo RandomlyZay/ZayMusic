@@ -802,6 +802,13 @@ private struct CatalogBackButton: ViewModifier {
     }
 }
 
+/// Evaluate large screen factories in a separate SwiftUI body update, rather than
+/// while the TabView and all its sibling navigation roots are being constructed.
+private struct ScreenContent: View {
+    let build: () -> AnyView
+    var body: some View { build() }
+}
+
 struct ContentView: View {
     @EnvironmentObject var music: Music
     @State private var pendingSongDeletion: [String: Any]?
@@ -832,70 +839,93 @@ struct ContentView: View {
     @State var libraryItems: [[String: Any]] = []
     @State var libraryLoaded = false
 
+    // Bound root metadata depth: the device crash stack exhausted the main stack
+    // resolving ContentView.body before its first frame. Computed `some View`
+    // properties alone do not erase their underlying generic types.
+    private var tabs: AnyView {
+        AnyView(TabView(selection: $selectedTab) {
+                AnyView(NavigationStack {
+                    ScreenContent { AnyView(screen("Home")) }
+                }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Home", systemImage: "house.fill") }.tag("Home")
+                AnyView(NavigationStack {
+                    ScreenContent { AnyView(searchScreen) }
+                }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Search", systemImage: "magnifyingglass") }.tag("Search")
+                AnyView(NavigationStack {
+                    ScreenContent { AnyView(libraryList.navigationTitle("Your Library")) }
+                }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Library", systemImage: "books.vertical") }.tag("Library")
+                    .badge(music.attentionCount)
+                AnyView(NavigationStack {
+                    ScreenContent { AnyView(NativeSettings { ScreenContent { AnyView(screen("Downloads")) } }) }
+                }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Settings", systemImage: "gear") }.tag("Settings")
+            }
+            .modifier(SystemTabPlayer(open: { sheet = true }))
+        )
+    }
+
+    private var observedTabs: AnyView {
+        AnyView(ScreenContent { tabs }
+            .task {
+                // Server failures change without the app's help; re-read them about once a minute.
+                while !Task.isCancelled {
+                    await music.checkServerAttention()
+                    try? await Task.sleep(for: .seconds(60))
+                }
+            }
+            .onChange(of: selectedTab) { previous, next in
+                tabCatalogs[previous] = music.captureCatalog()
+                if let snapshot = tabCatalogs[next] {
+                    music.restoreCatalog(snapshot)
+                } else {
+                    music.restoreCatalog(["page": next, "title": next, "kind": "songs", "rows": []])
+                }
+                selecting = false; selectedIds = []
+                if let pending = pendingNavigation {
+                    pendingNavigation = nil
+                    music.openCollection(pending.source, row: pending.row)
+                }
+            }
+        )
+    }
+
+    private var collectionPresentations: AnyView {
+        AnyView(ScreenContent { observedTabs }
+            .sheet(isPresented: $collectionActions, onDismiss: {
+                let action = pendingCollectionAction
+                pendingCollectionAction = nil
+                action?()
+            }) { collectionActionsSheet }
+            .sheet(item: $playlistSelection) { selection in PlaylistPickerSheet(selection: selection).environmentObject(music) }
+            .sheet(item: $tagEditing) { selection in TagEditorSheet(song: selection.song).environmentObject(music) }
+        )
+    }
+
+    private var playlistPresentations: AnyView {
+        AnyView(ScreenContent { collectionPresentations }
+            .alert(editingPlaylistId == nil ? "New playlist" : "Rename playlist", isPresented: $playlistEditor) {
+                TextField("Playlist name", text: $playlistName)
+                Button("Save") { let id = editingPlaylistId; let name = playlistName; Task { _ = await music.mutatePlaylist(["op": id == nil ? "create" : "rename", "id": id ?? "", "name": name], refresh: true) } }
+                Button("Cancel", role: .cancel) {}
+            }
+            .confirmationDialog("Delete playlist?", isPresented: $deletingPlaylist, titleVisibility: .visible, presenting: deletingPlaylistId) { id in
+                Button("Delete playlist", role: .destructive) { Task { _ = await music.mutatePlaylist(["op": "delete", "id": id], refresh: true) } }
+            }
+            .confirmationDialog("Remove all offline downloads?", isPresented: $clearDownloads, titleVisibility: .visible) {
+                Button("Remove all downloads", role: .destructive) { music.downloads?.removeAll() }
+            }
+            .alert("Delete song from server?", isPresented: Binding(get: { pendingSongDeletion != nil }, set: { if !$0 { pendingSongDeletion = nil } }), presenting: pendingSongDeletion) { row in
+                Button("Cancel", role: .cancel) { pendingSongDeletion = nil }
+                Button("Delete", role: .destructive) {
+                    pendingSongDeletion = nil
+                    Task { await music.library("deleteSong", item: row, kind: "songs") }
+                }
+            } message: { row in
+                Text("\u{201C}\(rowTitle(row))\u{201D} is removed from the server library for every device. Offline copies are managed separately.")
+            }
+        )
+    }
+
     var body: some View {
-        TabView(selection: $selectedTab) {
-            NavigationStack {
-                screen("Home")
-            }.modifier(LegacyPlayerInset(open: { sheet = true })).tabItem { Label("Home", systemImage: "house.fill") }.tag("Home")
-            NavigationStack {
-                searchScreen
-            }.modifier(LegacyPlayerInset(open: { sheet = true })).tabItem { Label("Search", systemImage: "magnifyingglass") }.tag("Search")
-            NavigationStack {
-                libraryList.navigationTitle("Your Library")
-            }.modifier(LegacyPlayerInset(open: { sheet = true })).tabItem { Label("Library", systemImage: "books.vertical") }.tag("Library")
-                .badge(music.attentionCount)
-            NavigationStack {
-                NativeSettings { screen("Downloads") }
-            }.modifier(LegacyPlayerInset(open: { sheet = true })).tabItem { Label("Settings", systemImage: "gear") }.tag("Settings")
-        }
-        .modifier(SystemTabPlayer(open: { sheet = true }))
-        .task {
-            // Server failures change without the app's help; re-read them about once a minute.
-            while !Task.isCancelled {
-                await music.checkServerAttention()
-                try? await Task.sleep(for: .seconds(60))
-            }
-        }
-        .onChange(of: selectedTab) { previous, next in
-            tabCatalogs[previous] = music.captureCatalog()
-            if let snapshot = tabCatalogs[next] {
-                music.restoreCatalog(snapshot)
-            } else {
-                music.restoreCatalog(["page": next, "title": next, "kind": "songs", "rows": []])
-            }
-            selecting = false; selectedIds = []
-            if let pending = pendingNavigation {
-                pendingNavigation = nil
-                music.openCollection(pending.source, row: pending.row)
-            }
-        }
-        .sheet(isPresented: $collectionActions, onDismiss: {
-            let action = pendingCollectionAction
-            pendingCollectionAction = nil
-            action?()
-        }) { collectionActionsSheet }
-        .sheet(item: $playlistSelection) { selection in PlaylistPickerSheet(selection: selection).environmentObject(music) }
-        .sheet(item: $tagEditing) { selection in TagEditorSheet(song: selection.song).environmentObject(music) }
-        .alert(editingPlaylistId == nil ? "New playlist" : "Rename playlist", isPresented: $playlistEditor) {
-            TextField("Playlist name", text: $playlistName)
-            Button("Save") { let id = editingPlaylistId; let name = playlistName; Task { _ = await music.mutatePlaylist(["op": id == nil ? "create" : "rename", "id": id ?? "", "name": name], refresh: true) } }
-            Button("Cancel", role: .cancel) {}
-        }
-        .confirmationDialog("Delete playlist?", isPresented: $deletingPlaylist, titleVisibility: .visible, presenting: deletingPlaylistId) { id in
-            Button("Delete playlist", role: .destructive) { Task { _ = await music.mutatePlaylist(["op": "delete", "id": id], refresh: true) } }
-        }
-        .confirmationDialog("Remove all offline downloads?", isPresented: $clearDownloads, titleVisibility: .visible) {
-            Button("Remove all downloads", role: .destructive) { music.downloads?.removeAll() }
-        }
-        .alert("Delete song from server?", isPresented: Binding(get: { pendingSongDeletion != nil }, set: { if !$0 { pendingSongDeletion = nil } }), presenting: pendingSongDeletion) { row in
-            Button("Cancel", role: .cancel) { pendingSongDeletion = nil }
-            Button("Delete", role: .destructive) {
-                pendingSongDeletion = nil
-                Task { await music.library("deleteSong", item: row, kind: "songs") }
-            }
-        } message: { row in
-            Text("\u{201C}\(rowTitle(row))\u{201D} is removed from the server library for every device. Offline copies are managed separately.")
-        }
+        ScreenContent { playlistPresentations }
         .sheet(isPresented: $sheet) {
             NowPlayingView(goTo: goTo).environmentObject(music)
         }
@@ -1121,9 +1151,9 @@ struct ContentView: View {
         libraryLoaded = text != nil
     }
 
-    func libraryItemLink(_ item: [String: Any]) -> some View {
+    func libraryItemLink(_ item: [String: Any]) -> AnyView {
         let source = item["browseKind"] as? String ?? item["kind"] as? String ?? ""
-        return NavigationLink {
+        return AnyView(NavigationLink {
             if source == "liked" { screen("Liked Songs") } else { collectionScreen(source, item) }
         } label: {
             HStack(spacing: 12) {
@@ -1137,27 +1167,30 @@ struct ContentView: View {
         }
         .listRowSeparator(.hidden)
         .accessibilityIdentifier("library-item-\(item["id"] as? String ?? "unknown")")
+        )
     }
 
     /// A collection pushed by the system navigation stack; its own Back pops the stack.
-    func collectionScreen(_ source: String, _ row: [String: Any]) -> some View {
-        trackList
+    func collectionScreen(_ source: String, _ row: [String: Any]) -> AnyView {
+        AnyView(ScreenContent { AnyView(trackList) }
             .navigationTitle(music.headerTitle)
             .navigationBarTitleDisplayMode(.inline)
             .modifier(OpenCollectionOnFirstAppearance(source: source, row: row))
             .modifier(CatalogBackButton())
             .toolbar { collectionToolbar }
+        )
     }
 
-    func libraryLink(_ page: String, _ subtitle: String, kind: ArtKind = .other, symbol: String? = nil) -> some View {
-        NavigationLink { screen(page) } label: {
+    func libraryLink(_ page: String, _ subtitle: String, kind: ArtKind = .other, symbol: String? = nil) -> AnyView {
+        AnyView(NavigationLink { ScreenContent { AnyView(screen(page)) } } label: {
             LibraryRow(title: page, subtitle: subtitle, kind: kind, symbol: symbol)
         }
         .listRowSeparator(.hidden)
+        )
     }
 
-    func screen(_ page: String) -> some View {
-        trackList
+    func screen(_ page: String) -> AnyView {
+        AnyView(ScreenContent { AnyView(trackList) }
             .navigationTitle(music.page == page ? page : music.headerTitle)
             .navigationBarTitleDisplayMode(showsHero ? .inline : .large)
             .modifier(LoadCatalogOnFirstAppearance(page: page))
@@ -1174,6 +1207,7 @@ struct ContentView: View {
                 }
             }
             .toolbar { collectionToolbar }
+        )
     }
 
     var isPlaylistCollection: Bool { music.page == "Collection" && music.collectionContext["kind"] as? String == "playlists" }
@@ -1510,13 +1544,13 @@ struct ContentView: View {
         }
     }
 
-    func trackRow(_ row: [String: Any], at index: Int) -> some View {
+    func trackRow(_ row: [String: Any], at index: Int) -> AnyView {
         let download = row["download"] as? [String: Any]
         let state = download?["state"] as? String ?? ""
         let source = music.rowKind(row)
         let id = row["id"] as? String ?? "unknown"
         let choosing = selecting && !music.resolvedKind.isEmpty && source == "songs"
-        return Button {
+        return AnyView(Button {
             if choosing { if selectedIds.contains(id) { selectedIds.remove(id) } else { selectedIds.insert(id) } }
             else { music.select(row, at: index) }
         } label: {
@@ -1558,6 +1592,9 @@ struct ContentView: View {
                 }
             }
             .contentShape(Rectangle())
+            // Install the menu on the label hit area so a long press is handled
+            // before the outer playback button and List swipe actions.
+            .contextMenu { rowMenu(row, source: source, download: download, state: state) }
         }
         .buttonStyle(.plain)
         .listRowSeparator(.hidden)
@@ -1575,7 +1612,7 @@ struct ContentView: View {
                 Button(role: .destructive) { music.queueAction("remove", row: row) } label: { Label("Remove from queue", systemImage: "minus.circle") }
             }
         }
-        .contextMenu { rowMenu(row, source: source, download: download, state: state) }
+        )
     }
 
     @ViewBuilder func rowMenu(_ row: [String: Any], source: String, download: [String: Any]?, state: String) -> some View {
