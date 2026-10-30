@@ -832,70 +832,93 @@ struct ContentView: View {
     @State var libraryItems: [[String: Any]] = []
     @State var libraryLoaded = false
 
+    // Bound root metadata depth: the device crash stack exhausted the main stack
+    // resolving ContentView.body before its first frame. Computed `some View`
+    // properties alone do not erase their underlying generic types.
+    private var tabs: AnyView {
+        AnyView(TabView(selection: $selectedTab) {
+                AnyView(NavigationStack {
+                    screen("Home")
+                }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Home", systemImage: "house.fill") }.tag("Home")
+                AnyView(NavigationStack {
+                    searchScreen
+                }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Search", systemImage: "magnifyingglass") }.tag("Search")
+                AnyView(NavigationStack {
+                    libraryList.navigationTitle("Your Library")
+                }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Library", systemImage: "books.vertical") }.tag("Library")
+                    .badge(music.attentionCount)
+                AnyView(NavigationStack {
+                    NativeSettings { screen("Downloads") }
+                }.modifier(LegacyPlayerInset(open: { sheet = true }))).tabItem { Label("Settings", systemImage: "gear") }.tag("Settings")
+            }
+            .modifier(SystemTabPlayer(open: { sheet = true }))
+        )
+    }
+
+    private var observedTabs: AnyView {
+        AnyView(tabs
+            .task {
+                // Server failures change without the app's help; re-read them about once a minute.
+                while !Task.isCancelled {
+                    await music.checkServerAttention()
+                    try? await Task.sleep(for: .seconds(60))
+                }
+            }
+            .onChange(of: selectedTab) { previous, next in
+                tabCatalogs[previous] = music.captureCatalog()
+                if let snapshot = tabCatalogs[next] {
+                    music.restoreCatalog(snapshot)
+                } else {
+                    music.restoreCatalog(["page": next, "title": next, "kind": "songs", "rows": []])
+                }
+                selecting = false; selectedIds = []
+                if let pending = pendingNavigation {
+                    pendingNavigation = nil
+                    music.openCollection(pending.source, row: pending.row)
+                }
+            }
+        )
+    }
+
+    private var collectionPresentations: AnyView {
+        AnyView(observedTabs
+            .sheet(isPresented: $collectionActions, onDismiss: {
+                let action = pendingCollectionAction
+                pendingCollectionAction = nil
+                action?()
+            }) { collectionActionsSheet }
+            .sheet(item: $playlistSelection) { selection in PlaylistPickerSheet(selection: selection).environmentObject(music) }
+            .sheet(item: $tagEditing) { selection in TagEditorSheet(song: selection.song).environmentObject(music) }
+        )
+    }
+
+    private var playlistPresentations: AnyView {
+        AnyView(collectionPresentations
+            .alert(editingPlaylistId == nil ? "New playlist" : "Rename playlist", isPresented: $playlistEditor) {
+                TextField("Playlist name", text: $playlistName)
+                Button("Save") { let id = editingPlaylistId; let name = playlistName; Task { _ = await music.mutatePlaylist(["op": id == nil ? "create" : "rename", "id": id ?? "", "name": name], refresh: true) } }
+                Button("Cancel", role: .cancel) {}
+            }
+            .confirmationDialog("Delete playlist?", isPresented: $deletingPlaylist, titleVisibility: .visible, presenting: deletingPlaylistId) { id in
+                Button("Delete playlist", role: .destructive) { Task { _ = await music.mutatePlaylist(["op": "delete", "id": id], refresh: true) } }
+            }
+            .confirmationDialog("Remove all offline downloads?", isPresented: $clearDownloads, titleVisibility: .visible) {
+                Button("Remove all downloads", role: .destructive) { music.downloads?.removeAll() }
+            }
+            .alert("Delete song from server?", isPresented: Binding(get: { pendingSongDeletion != nil }, set: { if !$0 { pendingSongDeletion = nil } }), presenting: pendingSongDeletion) { row in
+                Button("Cancel", role: .cancel) { pendingSongDeletion = nil }
+                Button("Delete", role: .destructive) {
+                    pendingSongDeletion = nil
+                    Task { await music.library("deleteSong", item: row, kind: "songs") }
+                }
+            } message: { row in
+                Text("\u{201C}\(rowTitle(row))\u{201D} is removed from the server library for every device. Offline copies are managed separately.")
+            }
+        )
+    }
+
     var body: some View {
-        TabView(selection: $selectedTab) {
-            NavigationStack {
-                screen("Home")
-            }.modifier(LegacyPlayerInset(open: { sheet = true })).tabItem { Label("Home", systemImage: "house.fill") }.tag("Home")
-            NavigationStack {
-                searchScreen
-            }.modifier(LegacyPlayerInset(open: { sheet = true })).tabItem { Label("Search", systemImage: "magnifyingglass") }.tag("Search")
-            NavigationStack {
-                libraryList.navigationTitle("Your Library")
-            }.modifier(LegacyPlayerInset(open: { sheet = true })).tabItem { Label("Library", systemImage: "books.vertical") }.tag("Library")
-                .badge(music.attentionCount)
-            NavigationStack {
-                NativeSettings { screen("Downloads") }
-            }.modifier(LegacyPlayerInset(open: { sheet = true })).tabItem { Label("Settings", systemImage: "gear") }.tag("Settings")
-        }
-        .modifier(SystemTabPlayer(open: { sheet = true }))
-        .task {
-            // Server failures change without the app's help; re-read them about once a minute.
-            while !Task.isCancelled {
-                await music.checkServerAttention()
-                try? await Task.sleep(for: .seconds(60))
-            }
-        }
-        .onChange(of: selectedTab) { previous, next in
-            tabCatalogs[previous] = music.captureCatalog()
-            if let snapshot = tabCatalogs[next] {
-                music.restoreCatalog(snapshot)
-            } else {
-                music.restoreCatalog(["page": next, "title": next, "kind": "songs", "rows": []])
-            }
-            selecting = false; selectedIds = []
-            if let pending = pendingNavigation {
-                pendingNavigation = nil
-                music.openCollection(pending.source, row: pending.row)
-            }
-        }
-        .sheet(isPresented: $collectionActions, onDismiss: {
-            let action = pendingCollectionAction
-            pendingCollectionAction = nil
-            action?()
-        }) { collectionActionsSheet }
-        .sheet(item: $playlistSelection) { selection in PlaylistPickerSheet(selection: selection).environmentObject(music) }
-        .sheet(item: $tagEditing) { selection in TagEditorSheet(song: selection.song).environmentObject(music) }
-        .alert(editingPlaylistId == nil ? "New playlist" : "Rename playlist", isPresented: $playlistEditor) {
-            TextField("Playlist name", text: $playlistName)
-            Button("Save") { let id = editingPlaylistId; let name = playlistName; Task { _ = await music.mutatePlaylist(["op": id == nil ? "create" : "rename", "id": id ?? "", "name": name], refresh: true) } }
-            Button("Cancel", role: .cancel) {}
-        }
-        .confirmationDialog("Delete playlist?", isPresented: $deletingPlaylist, titleVisibility: .visible, presenting: deletingPlaylistId) { id in
-            Button("Delete playlist", role: .destructive) { Task { _ = await music.mutatePlaylist(["op": "delete", "id": id], refresh: true) } }
-        }
-        .confirmationDialog("Remove all offline downloads?", isPresented: $clearDownloads, titleVisibility: .visible) {
-            Button("Remove all downloads", role: .destructive) { music.downloads?.removeAll() }
-        }
-        .alert("Delete song from server?", isPresented: Binding(get: { pendingSongDeletion != nil }, set: { if !$0 { pendingSongDeletion = nil } }), presenting: pendingSongDeletion) { row in
-            Button("Cancel", role: .cancel) { pendingSongDeletion = nil }
-            Button("Delete", role: .destructive) {
-                pendingSongDeletion = nil
-                Task { await music.library("deleteSong", item: row, kind: "songs") }
-            }
-        } message: { row in
-            Text("\u{201C}\(rowTitle(row))\u{201D} is removed from the server library for every device. Offline copies are managed separately.")
-        }
+        playlistPresentations
         .sheet(isPresented: $sheet) {
             NowPlayingView(goTo: goTo).environmentObject(music)
         }

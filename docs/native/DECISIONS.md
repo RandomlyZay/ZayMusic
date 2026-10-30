@@ -143,3 +143,14 @@ are historical where they describe a supported web client or hosted Linux CI.
   `ZayMusic` received only the squashed tree. The archive keeps PR #4, CodeRabbit
   reviews and Actions history; a full local git bundle is kept on devbox outside the
   worktree. The native work lands directly on `main`; no draft PR remains.
+
+- Bound `ContentView`'s generic metadata with `AnyView` at each tab and between
+  groups of root presentation modifiers. The iPhone/LiveContainer startup report
+  for the retained 98ab134 IPA (UUID e441e14f-0625-39b7-84f4-4ac70f067013)
+  hit a main-thread stack guard during Swift type decoding before the first frame.
+  Its app offset 133044 falls inside `ContentView.body` (symbol starts at 131920);
+  offset 128256 is the concrete-type metadata instantiator. Splitting computed
+  `some View` properties alone still exposes their underlying generic types.
+  Keep tab tags, labels and badges outside erasure so TabView sees their traits.
+  Linux parsing/bridge checks cannot establish device startup success; verify the
+  rebuilt IPA in LiveContainer as well as simulator UI tests.
