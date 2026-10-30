@@ -115,8 +115,8 @@ Generated with `./scripts/gen-secrets.sh`.
 ## Native clients
 
 The SvelteKit web client was removed; the native apps are the only clients. Its
-last source (behaviour reference and tests) is recoverable with
-`git show 93f43ec:apps/web/<path>`. See [the parity checklist](docs/native/PARITY.md),
+last source (behaviour reference and tests) is commit `93f43ec:apps/web/` in the
+owner's private pre-squash archive; this public history starts after its removal. See [the parity checklist](docs/native/PARITY.md),
 [device testing and delivery](docs/native/TESTING.md) and
 [implementation decisions](docs/native/DECISIONS.md).
 

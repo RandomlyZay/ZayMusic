@@ -1,6 +1,6 @@
 > Native migration scope: the web client is retired at the owner’s request.
 > Web-specific implementation references below are historical; the behavior
-> reference is `git show 93f43ec:apps/web/...`. Current clients are Linux and iPhone;
+> reference is `93f43ec:apps/web/...` (private pre-squash archive). Current clients are Linux and iPhone;
 > their API gateway is `crates/zay-gateway`. Authentication ownership remains as
 > documented here. See `docs/native/DECISIONS.md` for current decisions.
 

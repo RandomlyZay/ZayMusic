@@ -1,7 +1,7 @@
 # Native feature parity
 
 Audit of the native clients against the retired web client (historical source:
-`git show 93f43ec:apps/web/...`). The web client was removed at the owner's request.
+`93f43ec:apps/web/...` (private pre-squash archive)). The web client was removed at the owner's request.
 Every web feature is implemented in both native clients. No feature was declared
 impossible. Evidence levels used below:
 

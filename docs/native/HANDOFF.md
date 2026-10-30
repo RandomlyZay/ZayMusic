@@ -9,7 +9,7 @@
   Old history, PR #4, reviews and Actions runs: private `RandomlyZay/ZayMusic-archive-2026-10`
   plus the bundle in ~/.local/share/zaymusic-history/. Mac builds:
   `gh workflow run native.yml --ref main` (manual, batched).
-- Web client removed (owner override). Historical spec: git show 93f43ec:apps/web/...
+- Web client removed (owner override). Historical spec: 93f43ec:apps/web/... in the private archive repo or history bundle.
 - Privacy: never read dev.env/.env, real keys/user IDs, browser storage, real settings
   screens or compiled credentials. Fixture data only. No production/fedora-server changes.
 
