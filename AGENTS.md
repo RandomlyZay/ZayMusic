@@ -1,5 +1,13 @@
 # Agent instructions
 
+## Pull requests and validation
+
+Use pull requests exclusively for iOS builds and their validation. Attach Apple
+build and simulator checks to the iOS PR so its watcher receives check results.
+All other work, including Linux builds, is developed and validated locally; do
+not create a PR or start hosted CI for it. Keep this distinction when working
+on shared code: use an iOS PR only when an iOS build is part of the task.
+
 ## Rebuild and serve app changes
 
 After every gateway or service change, rebuild and serve the version that is actually being reviewed before reporting completion. The API gateway (`crates/zay-gateway`, compose service `zaymusic`, container `zaymusic-gateway`) is served on loopback port `3847`. Native client changes are verified with their own scripts (`scripts/native-*.sh`); there is no web client.
