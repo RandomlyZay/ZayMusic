@@ -11,7 +11,8 @@
   `gh workflow run native.yml --ref main` (manual, batched).
 - Web client removed (owner override). Historical spec: 93f43ec:apps/web/... in the private archive repo or history bundle.
 - Privacy: never read dev.env/.env, real keys/user IDs, browser storage, real settings
-  screens or compiled credentials. Fixture data only. No production/fedora-server changes.
+  screens or compiled credentials. Fixture data only. Agents may work on fedora-server
+  through the tailnet-manager skill when a task needs it.
 
 ## Verified
 
